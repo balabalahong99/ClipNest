@@ -1,5 +1,9 @@
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
+
+import pystray
+from PIL import Image, ImageDraw
 
 from database import Database
 
@@ -10,7 +14,7 @@ POLL_INTERVAL_MS = 500
 class ClipNestApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("ClipNest")
+        self.root.title("ClipNest - 剪贴板历史工具")
         self.root.geometry("760x520")
         self.root.minsize(560, 400)
 
@@ -20,6 +24,7 @@ class ClipNestApp:
         self.paused = False   # 是否暂停监听
 
         self.build_ui()
+        self.setup_tray()
         self.refresh()
         self.poll_clipboard()
 
@@ -75,6 +80,62 @@ class ClipNestApp:
             font=("Microsoft YaHei UI", 9),
         )
         self.status.pack(fill="x", padx=16, pady=(8, 12))
+
+    def setup_tray(self):
+        """创建系统托盘图标，菜单在独立线程里运行。"""
+        menu = pystray.Menu(
+            pystray.MenuItem("显示主窗口", self.on_tray_show, default=True),
+            pystray.MenuItem(
+                lambda item: "恢复监听" if self.paused else "暂停监听",
+                self.on_tray_toggle_pause,
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("退出", self.on_tray_quit),
+        )
+        self.tray = pystray.Icon(
+            "ClipNest",
+            self.tray_image(),
+            "ClipNest - 剪贴板历史工具",
+            menu,
+        )
+        # pystray 会阻塞，放到守护线程里跑，Tkinter 主循环才能继续
+        threading.Thread(target=self.tray.run, daemon=True).start()
+
+    @staticmethod
+    def tray_image():
+        """用代码画一个剪贴板图标，避免依赖外部图片文件。"""
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle([10, 10, 54, 58], radius=8, fill="#2D6CDF")
+        draw.rectangle([22, 4, 42, 14], fill="#FFFFFF")
+        draw.rounded_rectangle([19, 22, 45, 29], radius=3, fill="#FFFFFF")
+        draw.rounded_rectangle([19, 37, 45, 44], radius=3, fill="#FFFFFF")
+        return img
+
+    def show_window(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def hide_window(self):
+        """关闭窗口时收进托盘，而不是结束程序。"""
+        self.root.withdraw()
+        self.status.config(text="已最小化到托盘，双击图标可恢复")
+
+    def quit_app(self):
+        self.tray.stop()
+        self.db.close()
+        self.root.destroy()
+
+    # 以下三个回调运行在托盘线程里，必须切回 Tk 主线程再操作界面
+    def on_tray_show(self, icon=None, item=None):
+        self.root.after(0, self.show_window)
+
+    def on_tray_toggle_pause(self, icon=None, item=None):
+        self.root.after(0, self.toggle_pause)
+
+    def on_tray_quit(self, icon=None, item=None):
+        self.root.after(0, self.quit_app)
 
     def refresh(self):
         """按当前搜索词从数据库读取数据并重绘列表。"""
@@ -167,7 +228,8 @@ class ClipNestApp:
 def main():
     root = tk.Tk()
     app = ClipNestApp(root)
-    root.protocol("WM_DELETE_WINDOW", lambda: (app.db.close(), root.destroy()))
+    # 点窗口的 × 只收进托盘；真正退出走托盘菜单里的“退出”
+    root.protocol("WM_DELETE_WINDOW", app.hide_window)
     root.mainloop()
 
 
