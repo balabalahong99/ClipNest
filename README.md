@@ -17,7 +17,7 @@
 需要 Windows 和 Python 3.9 以上版本，无需安装任何第三方库。
 
 ```powershell
-git clone https://github.com/<你的用户名>/ClipNest.git
+git clone https://github.com/balabalahong99/ClipNest.git
 cd ClipNest
 python app.py
 ```
